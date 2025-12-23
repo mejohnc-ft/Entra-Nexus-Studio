@@ -1,0 +1,967 @@
+import React, { useState, useCallback } from 'react';
+import { 
+  Cloud, 
+  Cpu, 
+  Terminal, 
+  Play, 
+  Shield, 
+  Zap, 
+  Wifi, 
+  Activity, 
+  Server, 
+  Code, 
+  Lock, 
+  Unlock,
+  HardDrive,
+  AlertTriangle,
+  FileSearch,
+  Globe,
+  Network,
+  Clock,
+  Layers,
+  Package,
+  RefreshCw,
+  Download,
+  Upload,
+  XCircle,
+  Database,
+  Eye
+} from 'lucide-react';
+
+// Industry Benchmarks (Constants for calculations)
+const BENCHMARKS = {
+  cloud_input_cost: 0.005, // per 1k tokens (GPT-4o est)
+  cloud_output_cost: 0.015, // per 1k tokens
+  avg_latency_cloud: 800, // ms
+  avg_latency_edge: 120, // ms
+  npu_power: 12, // Watts (Intel Core Ultra / Snapdragon X Elite)
+  cloud_gpu_power: 400 // Watts (H100 slice est)
+};
+
+// Component for the Telemetry Panel
+const TelemetryPanel = ({ labMetrics, activeScenario }) => {
+  return (
+    <div className="h-full flex flex-col space-y-4 p-2">
+      <div className="grid grid-cols-2 gap-4">
+          <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+            <div className="text-xs text-slate-500 uppercase">Est. Cost Savings</div>
+            <div className="text-2xl font-mono text-green-400">${labMetrics.estCostSaved.toFixed(4)}</div>
+            <div className="text-[10px] text-slate-600">vs Cloud-Only Processing</div>
+          </div>
+          <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+            <div className="text-xs text-slate-500 uppercase">Bandwidth Saved</div>
+            <div className="text-2xl font-mono text-blue-400">
+              {labMetrics.totalBandwidthSaved > 1024 
+                ? `${(labMetrics.totalBandwidthSaved / 1024).toFixed(2)} MB` 
+                : `${labMetrics.totalBandwidthSaved.toFixed(0)} KB`}
+            </div>
+            <div className="text-[10px] text-slate-600">Local Data Retention</div>
+          </div>
+      </div>
+
+      <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-800 flex-1">
+        <div className="text-xs text-slate-500 uppercase mb-3">Token Economics (Last Run)</div>
+        {activeScenario ? (
+            <div className="space-y-3">
+              <div className="flex justify-between text-xs">
+                  <span className="text-slate-400">System Prompt (Cloud)</span>
+                  <span className="font-mono text-slate-200">{activeScenario.stats.tokenCount.system} tks</span>
+              </div>
+              <div className="flex justify-between text-xs">
+                  <span className="text-slate-400">User Prompt (Cloud)</span>
+                  <span className="font-mono text-slate-200">{activeScenario.stats.tokenCount.user} tks</span>
+              </div>
+              <div className="w-full h-px bg-slate-800 my-1"></div>
+              <div className="flex justify-between text-xs">
+                  <span className="text-purple-400 font-bold">Local Context Processed</span>
+                  <span className="font-mono text-purple-400 font-bold">{activeScenario.stats.tokenCount.context.toLocaleString()} tks</span>
+              </div>
+              <div className="text-[10px] text-slate-600 italic mt-2">
+                  *Local processing performed on NPU @ {BENCHMARKS.npu_power}W. 
+                  Equivalent Cloud Processing would require uploading {activeScenario.stats.contextSize} of data.
+              </div>
+            </div>
+        ) : (
+          <div className="text-slate-600 text-xs italic text-center mt-10">Run a scenario to see token breakdown</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Protocol Inspector Component
+const ProtocolInspector = ({ type, showCode, setShowCode, activeScenario, privacyMode }) => {
+  if (!showCode || showCode !== type || !activeScenario) return null;
+  
+  const flow = activeScenario.entraFlow;
+  const stats = activeScenario.stats;
+  let content = {};
+  
+  switch(type) {
+    case 'cloud':
+      content = {
+        protocol: "HTTP/2 over TLS 1.3",
+        endpoint: "https://ai-foundry.azure.com/api/v1/orchestrate",
+        metrics: {
+          request_size_bytes: 450,
+          prompt_tokens: stats.tokenCount.system + stats.tokenCount.user,
+          est_latency_ms: stats.processing.cloudMs,
+          region: "eastus2"
+        },
+        payload: {
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: "You are an Entra-integrated support orchestrator..." },
+            { role: "user", content: activeScenario.prompt }
+          ],
+          tools: ["delegate_to_edge", "escalate_to_human"]
+        }
+      };
+      break;
+      
+    case 'local':
+      content = {
+        runtime: "Foundry Local Runtime v2.1",
+        hardware: "Intel Core Ultra NPU (Gen3)",
+        performance: {
+            npu_utilization: "84%",
+            tokens_per_second: 42.5,
+            power_draw: "12W",
+            thermal_status: "NOMINAL"
+        },
+        context: {
+          data_source: `Local OS (${stats.contextSize})`,
+          privacy_policy: privacyMode ? "Zero-Knowledge / Air-Gapped" : "Telemetry Enabled",
+          vector_store: "Embedded/ChromaDB-Lite"
+        },
+        model_config: {
+          id: flow.localModel,
+          quantization: "int4",
+          context_window: 128000
+        }
+      };
+      break;
+      
+    case 'mcp':
+      content = {
+        protocol: "JSON-RPC 2.0 over stdio",
+        transport: "NamedPipe",
+        payload_size: `${(JSON.stringify(flow.result).length / 1024).toFixed(2)} KB`,
+        request: {
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: {
+            name: flow.mcpTool,
+            arguments: flow.params
+          }
+        },
+        result: flow.result
+      };
+      break;
+    default:
+      content = {};
+  }
+  
+  return (
+    <div className="absolute top-12 left-4 right-4 z-20 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-4 font-mono text-xs animate-in fade-in zoom-in duration-200 max-h-96 overflow-y-auto">
+      <div className="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
+        <span className="text-slate-400 uppercase tracking-wider font-bold">
+          {type === 'cloud' ? 'Azure AI Foundry' : type === 'local' ? 'Foundry Local' : 'MCP Protocol'} Inspector
+        </span>
+        <button 
+          onClick={(e) => { e.stopPropagation(); setShowCode(null); }} 
+          className="text-slate-500 hover:text-white transition-colors"
+        >
+          <XCircle className="w-4 h-4" />
+        </button>
+      </div>
+      <pre className="whitespace-pre-wrap text-green-400">
+        {JSON.stringify(content, null, 2)}
+      </pre>
+    </div>
+  );
+};
+
+const EntraNexusStudio = () => {
+  // Core state management
+  const [activeStep, setActiveStep] = useState(0);
+  const [scenarioKey, setScenarioKey] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [privacyMode, setPrivacyMode] = useState(true);
+  const [showCode, setShowCode] = useState(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [activeTab, setActiveTab] = useState('console'); // 'console' or 'telemetry'
+
+  // Realistic Lab Metrics State
+  const [labMetrics, setLabMetrics] = useState({
+    totalCloudTokens: 0,
+    totalLocalTokens: 0,
+    totalBandwidthSaved: 0, // in KB
+    estCostSaved: 0, // in USD
+    avgLatency: 0,
+    totalRuns: 0
+  });
+
+  // Enhanced scenarios with Realistic Data payloads
+  const scenarios = {
+    battery: {
+      id: 'battery',
+      title: "Battery Drain Analysis",
+      icon: <Zap className="w-4 h-4" />,
+      category: "Diagnostics",
+      prompt: "My laptop battery is dying in 2 hours. What's wrong?",
+      stats: {
+        contextSize: "2.4 MB", // Size of Event Logs + Powercfg report
+        tokenCount: { system: 850, user: 45, context: 12500 }, // Context is huge for logs
+        bandwidth: { cloud: 2400, local: 2 }, // KB transferred
+        processing: { cloudMs: 4500, localMs: 800 } // Local parsers are faster than text-upload
+      },
+      entraFlow: {
+        auth: "Entra ID OAuth 2.0",
+        scope: "Device.ReadWrite",
+        cloudIntent: "diagnose_device_health",
+        routing: "Semantic Router → Edge Agent",
+        localModel: "Phi-3-mini-4k-instruct",
+        mcpServer: "win.power_management",
+        mcpTool: "get_power_usage_report",
+        params: { duration: "24h", sort_by: "consumption_desc", include_processes: true },
+        result: { 
+          top_process: "videoconf.exe", 
+          impact: "high", 
+          drain_rate: "15W", 
+          recommendation: "enable_efficiency_mode",
+          estimated_savings: "3.5 hours"
+        }
+      }
+    },
+    wifi: {
+      id: 'wifi',
+      title: "Network Latency Check",
+      icon: <Wifi className="w-4 h-4" />,
+      category: "Network",
+      prompt: "The internet is super laggy during calls.",
+      stats: {
+        contextSize: "150 KB", // Netsh trace snippet
+        tokenCount: { system: 850, user: 30, context: 4000 },
+        bandwidth: { cloud: 150, local: 1 },
+        processing: { cloudMs: 2200, localMs: 600 }
+      },
+      entraFlow: {
+        auth: "Entra ID Device Certificate",
+        scope: "Network.Diagnostics",
+        cloudIntent: "troubleshoot_network",
+        routing: "Intent Classifier → Local NPU",
+        localModel: "Phi-3-mini-128k-instruct",
+        mcpServer: "win.network_stack",
+        mcpTool: "get_network_adapter_stats",
+        params: { interface: "Wi-Fi", check_period: "15m", deep_analysis: true },
+        result: { 
+          packet_loss: "12%", 
+          latency_avg: "450ms", 
+          driver_event: "reset_needed",
+          qos_violation: true
+        }
+      }
+    },
+    security: {
+      id: 'security',
+      title: "Security Audit (Intrusion)",
+      icon: <Shield className="w-4 h-4" />,
+      category: "Security",
+      prompt: "I think someone accessed my machine last night.",
+      stats: {
+        contextSize: "45 MB", // Full Security Event Log
+        tokenCount: { system: 1200, user: 25, context: 85000 }, // Massive context
+        bandwidth: { cloud: 45000, local: 5 }, // Huge savings
+        processing: { cloudMs: 12000, localMs: 1500 } // Local grep/query is instantaneous compared to upload
+      },
+      entraFlow: {
+        auth: "Entra ID MFA + Conditional Access",
+        scope: "SecurityEvents.Read",
+        cloudIntent: "investigate_security_event",
+        routing: "Security Policy → Isolated Runtime",
+        localModel: "Phi-3-small-8k-instruct",
+        mcpServer: "win.security_audit",
+        mcpTool: "query_security_log",
+        params: { event_ids: [4624, 4625], timeframe: "last_night", include_ip_geo: true },
+        result: { 
+          alert: true, 
+          event_id: 4624, 
+          user: "UNKNOWN_ADMIN", 
+          time: "02:14:00", 
+          origin: "RDP",
+          ip_address: "192.168.1.100",
+          risk_score: "HIGH"
+        }
+      }
+    },
+    disk: {
+      id: 'disk',
+      title: "Storage Optimization",
+      icon: <HardDrive className="w-4 h-4" />,
+      category: "Storage",
+      prompt: "I can't save my presentation, disk full.",
+      stats: {
+        contextSize: "12 KB", // Directory tree summary
+        tokenCount: { system: 600, user: 40, context: 800 },
+        bandwidth: { cloud: 12, local: 1 },
+        processing: { cloudMs: 1200, localMs: 300 }
+      },
+      entraFlow: {
+        auth: "Entra ID Service Principal",
+        scope: "FileSystem.Read",
+        cloudIntent: "optimize_storage",
+        routing: "Resource Manager → Local Agent",
+        localModel: "Phi-3-mini-4k-instruct",
+        mcpServer: "win.filesystem",
+        mcpTool: "scan_large_files",
+        params: { min_size: "1GB", path: "C:/Users/", include_temp: true },
+        result: { 
+          largest_dir: "C:/Temp/Logs", 
+          size: "45GB", 
+          recommendation: "safe_to_delete",
+          reclaimable: "42.3GB"
+        }
+      }
+    },
+    crash: {
+      id: 'crash',
+      title: "App Crash Debugging",
+      icon: <AlertTriangle className="w-4 h-4" />,
+      category: "Debugging",
+      prompt: "Excel keeps crashing when I open macro files.",
+      stats: {
+        contextSize: "8.5 MB", // WER Heap Dump snippet
+        tokenCount: { system: 900, user: 55, context: 18000 },
+        bandwidth: { cloud: 8500, local: 3 },
+        processing: { cloudMs: 6500, localMs: 1200 }
+      },
+      entraFlow: {
+        auth: "Entra ID Device Auth",
+        scope: "Diagnostics.Read",
+        cloudIntent: "debug_application_crash",
+        routing: "Error Classifier → Debug Runtime",
+        localModel: "Phi-3-mini-128k-instruct",
+        mcpServer: "win.error_reporting",
+        mcpTool: "get_wer_report",
+        params: { app_name: "excel.exe", recent: 1, include_stack_trace: true },
+        result: { 
+          app: "excel.exe", 
+          module: "vbe7.dll", 
+          exception: "0xC0000005", 
+          status: "patch_available",
+          crash_count: 3
+        }
+      }
+    }
+  };
+
+  const activeScenario = scenarioKey ? scenarios[scenarioKey] : null;
+
+  // Enhanced logging system
+  const addLog = useCallback((source, message, type = 'info', metadata = {}) => {
+    const timestamp = Date.now();
+    setLogs(prev => [...prev, {
+      id: timestamp + Math.random(),
+      timestamp,
+      source,
+      message,
+      type,
+      metadata
+    }]);
+  }, []);
+
+  // Calculate Metrics update
+  const calculateRunMetrics = useCallback((scenarioData) => {
+    const s = scenarioData.stats;
+    const tokensSaved = s.tokenCount.context; // Local processing saves uploading context
+    const bwSaved = s.bandwidth.cloud - s.bandwidth.local;
+    const costSaved = (tokensSaved / 1000) * BENCHMARKS.cloud_input_cost;
+    
+    // Using simple addition here because we reset metrics at the start of runSimulation.
+    // So 'prev' will be 0 when this runs.
+    setLabMetrics(prev => ({
+      totalCloudTokens: prev.totalCloudTokens + s.tokenCount.system + s.tokenCount.user,
+      totalLocalTokens: prev.totalLocalTokens + s.tokenCount.context, // Processed locally
+      totalBandwidthSaved: prev.totalBandwidthSaved + bwSaved,
+      estCostSaved: prev.estCostSaved + costSaved,
+      avgLatency: (prev.avgLatency * prev.totalRuns + s.processing.localMs) / (prev.totalRuns + 1),
+      totalRuns: prev.totalRuns + 1
+    }));
+  }, []);
+
+  // Realistic simulation with proper timing
+  const runSimulation = useCallback(async (key) => {
+    if (isRunning) return;
+    
+    // Reset Metrics for fresh run view (Per-Demo Analysis)
+    setLabMetrics({
+      totalCloudTokens: 0,
+      totalLocalTokens: 0,
+      totalBandwidthSaved: 0,
+      estCostSaved: 0,
+      avgLatency: 0,
+      totalRuns: 0
+    });
+
+    const data = scenarios[key];
+    setScenarioKey(key);
+    setLogs([]);
+    setIsRunning(true);
+    setActiveStep(1);
+    
+    // Switch to telemetry tab to show data flowing
+    if (activeTab === 'console') {
+      // optional: setActiveTab('telemetry'); 
+    }
+
+    // Step 1: Entra ID Authentication
+    addLog('Entra ID', 'Initiating OAuth 2.0 flow...', 'process');
+    await new Promise(resolve => setTimeout(resolve, 600));
+    addLog('Entra ID', `✓ Authenticated with scope: ${data.entraFlow.scope}`, 'success');
+    
+    // Step 2: Cloud Intent Recognition
+    addLog('Azure AI Foundry', `Analyzing Prompt (${data.stats.tokenCount.user} tokens)...`, 'input');
+    addLog('Azure AI Foundry', 'Running Intent Classification (GPT-4o)...', 'process');
+    await new Promise(resolve => setTimeout(resolve, 800));
+    addLog('Azure AI Foundry', `Intent: [${data.entraFlow.cloudIntent}]`, 'success');
+    addLog('Azure AI Foundry', `Routing: ${data.entraFlow.routing}`, 'info');
+    
+    // Step 3: Edge Agent Handoff
+    addLog('Foundry Local', 'Receiving secure context from cloud...', 'process');
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    if (privacyMode) {
+      addLog('Foundry Local', `🔒 Privacy Shield: Processing ${data.stats.contextSize} of local data on-device`, 'secure');
+    }
+    
+    addLog('Foundry Local', `Loading ${data.entraFlow.localModel} on NPU...`, 'process');
+    // Simulate NPU Spin up
+    await new Promise(resolve => setTimeout(resolve, 600));
+    
+    addLog('Foundry Local', `Selecting MCP tool: ${data.entraFlow.mcpTool}`, 'action');
+    setActiveStep(2);
+    
+    // Step 4: MCP Execution
+    addLog('MCP Client', `Connecting to ${data.entraFlow.mcpServer}...`, 'info');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    addLog('Windows 25H2', `Executing native API via MCP...`, 'action');
+    
+    // Simulate processing time based on data size
+    const processTime = data.stats.processing.localMs / 2; // Speed up for UI feel, but relative
+    await new Promise(resolve => setTimeout(resolve, processTime));
+    
+    addLog('MCP Server', 'JSON-RPC 2.0 response received', 'success');
+    setActiveStep(3);
+    
+    // Step 5: Local Processing & Synthesis
+    addLog('Foundry Local', `Summarizing ${data.stats.tokenCount.context} tokens of raw data...`, 'process');
+    await new Promise(resolve => setTimeout(resolve, 600));
+    addLog('Foundry Local', 'Generating natural language response...', 'process');
+    setActiveStep(4);
+    await new Promise(resolve => setTimeout(resolve, 800));
+    
+    // Step 6: Cloud Update & Completion
+    addLog('Azure AI Foundry', 'Updating support ticket with solution...', 'success');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    addLog('System', '✓ Resolution delivered to user', 'success');
+    
+    // Update Lab Metrics
+    calculateRunMetrics(data);
+    
+    setActiveStep(0);
+    setIsRunning(false);
+  }, [isRunning, privacyMode, addLog, calculateRunMetrics, activeTab, privacyMode]);
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-blue-500/30">
+      {/* Enhanced Header */}
+      <header className="border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="bg-gradient-to-br from-blue-600 to-purple-600 p-2.5 rounded-xl shadow-lg">
+                <Layers className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-white tracking-tight">Entra Nexus Studio</h1>
+                <p className="text-xs text-slate-400">Lab Environment: Hybrid AI Benchmarking</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-6">
+              <div className="flex items-center space-x-2 text-sm">
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-slate-900 rounded-full border border-slate-800">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  <span className="text-slate-400">Entra Connected</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-slate-500">Region</div>
+                <div className="text-sm font-mono text-blue-400">East US 2 (Low Latency)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        
+        {/* Lab Metrics Top Bar */}
+        <div className="grid grid-cols-4 gap-4 mb-8">
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-500 uppercase tracking-wider">Cloud Tokens</span>
+              <Upload className="w-3 h-3 text-blue-500" />
+            </div>
+            <div className="text-2xl font-bold text-blue-400">{labMetrics.totalCloudTokens.toLocaleString()}</div>
+            <div className="text-xs text-slate-600 mt-1">GPT-4o Input/Output</div>
+          </div>
+          
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-500 uppercase tracking-wider">Local Tokens</span>
+              <Download className="w-3 h-3 text-purple-500" />
+            </div>
+            <div className="text-2xl font-bold text-purple-400">{labMetrics.totalLocalTokens.toLocaleString()}</div>
+            <div className="text-xs text-slate-600 mt-1">Processed on NPU</div>
+          </div>
+          
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-500 uppercase tracking-wider">Local Latency</span>
+              <Clock className="w-3 h-3 text-orange-500" />
+            </div>
+            <div className="text-2xl font-bold text-orange-400">{labMetrics.avgLatency > 0 ? `${labMetrics.avgLatency.toFixed(0)}ms` : '--'}</div>
+            <div className="text-xs text-slate-600 mt-1">Execution Time</div>
+          </div>
+          
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-500 uppercase tracking-wider">Lab Savings</span>
+              <Database className="w-3 h-3 text-green-500" />
+            </div>
+            <div className="text-2xl font-bold text-green-400">${labMetrics.estCostSaved.toFixed(3)}</div>
+            <div className="text-xs text-slate-600 mt-1">Run Cost Offset</div>
+          </div>
+        </div>
+
+        {/* Three-Tier Architecture */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+
+          {/* Cloud Tier */}
+          <div 
+            className={`relative group rounded-2xl border transition-all duration-500 overflow-hidden
+              ${activeStep === 1 ? 'border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.3)] bg-slate-900' : 'border-slate-800 bg-slate-900/50'}
+            `}
+            onClick={() => activeScenario && setShowCode(showCode === 'cloud' ? null : 'cloud')}
+          >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-cyan-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
+            
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2.5 rounded-xl ${activeStep === 1 ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-slate-500'}`}>
+                    <Cloud className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-white">Azure AI Foundry</h2>
+                    <p className="text-xs text-slate-500">Cloud Orchestration</p>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 border border-slate-700 rounded">
+                    GPT-4o
+                  </div>
+                  <div className="flex items-center space-x-1 mt-1">
+                    <Globe className="w-3 h-3 text-slate-600" />
+                    <span className="text-[10px] text-slate-600">East US</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-slate-950 rounded-lg p-4 border border-slate-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-mono text-slate-400">INTENT ANALYSIS</span>
+                    {activeStep === 1 && (
+                      <div className="flex items-center space-x-1">
+                        <RefreshCw className="w-3 h-3 text-blue-400 animate-spin" />
+                        <span className="text-xs text-blue-400">Processing...</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="h-20 flex items-center justify-center text-center">
+                    {activeStep === 0 && (
+                      <div className="text-slate-600 text-sm">
+                        <Terminal className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        Awaiting user request
+                      </div>
+                    )}
+                    {activeStep >= 1 && activeScenario && (
+                      <div className="text-sm text-slate-300 animate-in fade-in slide-in-from-bottom-2">
+                        <div className="text-blue-400 mb-1">"{activeScenario.prompt}"</div>
+                        <div className="text-xs text-slate-500">
+                          → {activeScenario.entraFlow.cloudIntent}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">System Tokens:</span>
+                    <span className="text-blue-400 font-mono">
+                      {activeScenario ? activeScenario.stats.tokenCount.system : '--'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Router:</span>
+                    <span className="text-slate-400">Semantic v3.2</span>
+                  </div>
+                  <button className="w-full flex items-center justify-center space-x-1 text-xs text-slate-500 hover:text-blue-400 transition-colors disabled:opacity-50" disabled={!activeScenario}>
+                    <Eye className="w-3 h-3" />
+                    <span>Inspect Payload</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <ProtocolInspector 
+              type="cloud" 
+              showCode={showCode} 
+              setShowCode={setShowCode} 
+              activeScenario={activeScenario} 
+              privacyMode={privacyMode} 
+            />
+          </div>
+
+          {/* Edge Tier */}
+          <div 
+            className={`relative group rounded-2xl border transition-all duration-500 overflow-hidden
+              ${activeStep === 2 || activeStep === 4 ? 'border-purple-500 shadow-[0_0_30px_rgba(168,85,247,0.3)] bg-slate-900' : 'border-slate-800 bg-slate-900/50'}
+            `}
+            onClick={() => activeScenario && setShowCode(showCode === 'local' ? null : 'local')}
+          >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 to-pink-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
+
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2.5 rounded-xl ${activeStep === 2 || activeStep === 4 ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-800 text-slate-500'}`}>
+                    <Cpu className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-white">Foundry Local</h2>
+                    <p className="text-xs text-slate-500">Edge Runtime</p>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 border border-slate-700 rounded">
+                    Phi-3
+                  </div>
+                  <div className="flex items-center space-x-1 mt-1">
+                    <Activity className="w-3 h-3 text-slate-600" />
+                    <span className="text-[10px] text-slate-600">NPU</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center space-x-2">
+                      {privacyMode ? (
+                        <>
+                          <Lock className="w-4 h-4 text-green-400" />
+                          <span className="text-xs font-medium text-green-400">Air Gap Active</span>
+                        </>
+                      ) : (
+                        <>
+                          <Unlock className="w-4 h-4 text-orange-400" />
+                          <span className="text-xs font-medium text-orange-400">Telemetry Enabled</span>
+                        </>
+                      )}
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); setPrivacyMode(!privacyMode); }}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${privacyMode ? 'bg-green-500' : 'bg-slate-600'}`}
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition duration-200 ease-in-out ${privacyMode ? 'translate-x-5' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <div className="text-[10px] text-slate-600">
+                    {privacyMode ? 'No data leaves device' : 'Anonymous metrics shared'}
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-lg p-4 border border-slate-800 font-mono text-xs h-28 overflow-hidden">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="text-purple-400">Runtime Status</span>
+                    <span className="text-slate-600">v2.1.0</span>
+                  </div>
+                  {activeStep === 2 ? (
+                    <div className="space-y-1 text-green-400">
+                      <div>▶ Context: {activeScenario?.stats.contextSize}</div>
+                      <div>▶ Processing: {activeScenario?.stats.processing.localMs}ms</div>
+                      <div>▶ NPU Power: {BENCHMARKS.npu_power}W</div>
+                      <div>▶ Tool selected: {activeScenario?.entraFlow.mcpTool}</div>
+                    </div>
+                  ) : activeStep === 4 ? (
+                    <div className="space-y-1 text-blue-400">
+                      <div>▶ Tool result processed</div>
+                      <div>▶ Generating response...</div>
+                      <div>▶ Preparing for cloud sync</div>
+                    </div>
+                  ) : (
+                    <div className="text-slate-700">
+                      // Local agent idle<br/>
+                      // Awaiting delegation
+                    </div>
+                  )}
+                </div>
+
+                <button className="w-full flex items-center justify-center space-x-1 text-xs text-slate-500 hover:text-purple-400 transition-colors disabled:opacity-50" disabled={!activeScenario}>
+                  <Code className="w-3 h-3" />
+                  <span>View NPU Config</span>
+                </button>
+              </div>
+            </div>
+            <ProtocolInspector 
+              type="local" 
+              showCode={showCode} 
+              setShowCode={setShowCode} 
+              activeScenario={activeScenario} 
+              privacyMode={privacyMode} 
+            />
+          </div>
+
+          {/* MCP & OS Tier */}
+          <div 
+            className={`relative group rounded-2xl border transition-all duration-500 overflow-hidden
+              ${activeStep === 3 ? 'border-orange-500 shadow-[0_0_30px_rgba(249,115,22,0.3)] bg-slate-900' : 'border-slate-800 bg-slate-900/50'}
+            `}
+            onClick={() => activeScenario && setShowCode(showCode === 'mcp' ? null : 'mcp')}
+          >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-600 to-yellow-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
+
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className={`p-2.5 rounded-xl ${activeStep === 3 ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-800 text-slate-500'}`}>
+                    <Server className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-white">MCP Tool Shed</h2>
+                    <p className="text-xs text-slate-500">Windows 11 25H2</p>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end">
+                  <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 border border-slate-700 rounded">
+                    Native
+                  </div>
+                  <div className="flex items-center space-x-1 mt-1">
+                    <Package className="w-3 h-3 text-slate-600" />
+                    <span className="text-[10px] text-slate-600">MCP</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className={`p-2 rounded border text-xs flex items-center space-x-2 transition-all duration-300
+                    ${activeStep === 3 ? 'bg-orange-900/20 border-orange-500 text-orange-200' : 'bg-slate-900 border-slate-800 text-slate-500'}`}>
+                    {activeScenario ? activeScenario.icon : <Terminal className="w-3 h-3" />}
+                    <span className="truncate font-mono">
+                      {activeScenario ? activeScenario.entraFlow.mcpServer.split('.')[1] : 'Idle'}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded border border-slate-800 bg-slate-900 text-slate-500 text-xs flex items-center space-x-2">
+                    <FileSearch className="w-3 h-3" />
+                    <span className="font-mono">FileSystem</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 rounded-lg p-3 border border-slate-800 font-mono text-[10px] leading-relaxed h-28 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                  {activeStep === 3 && activeScenario ? (
+                    <div className="space-y-2">
+                      <div className="text-blue-400">→ JSON-RPC Request:</div>
+                      <div className="text-slate-400 ml-2">
+                        {`tools/call: ${activeScenario.entraFlow.mcpTool}`}
+                      </div>
+                      <div className="text-green-400">← Response:</div>
+                      <div className="text-slate-300 ml-2">
+                        {JSON.stringify(activeScenario.entraFlow.result, null, 1)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-slate-600">
+                      // MCP Server listening on stdio<br/>
+                      // Protocol: JSON-RPC 2.0<br/>
+                      // Awaiting tool invocation
+                    </div>
+                  )}
+                </div>
+
+                <button className="w-full flex items-center justify-center space-x-1 text-xs text-slate-500 hover:text-orange-400 transition-colors disabled:opacity-50" disabled={!activeScenario}>
+                  <Code className="w-3 h-3" />
+                  <span>View MCP Schema</span>
+                </button>
+              </div>
+            </div>
+            <ProtocolInspector 
+              type="mcp" 
+              showCode={showCode} 
+              setShowCode={setShowCode} 
+              activeScenario={activeScenario} 
+              privacyMode={privacyMode} 
+            />
+          </div>
+        </div>
+
+        {/* Control Panel & Logs */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Scenario Controls */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col h-[500px]">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-slate-300 flex items-center">
+                <Terminal className="w-4 h-4 mr-2 text-blue-500" />
+                Lab Scenarios
+              </h3>
+              <span className="text-xs text-slate-500">
+                {Object.keys(scenarios).length} Available
+              </span>
+            </div>
+            
+            <div className="space-y-2 overflow-y-auto pr-2 flex-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {Object.entries(scenarios).map(([key, data]) => (
+                <button 
+                  key={key}
+                  onClick={() => runSimulation(key)}
+                  disabled={isRunning}
+                  className={`w-full text-left p-3 rounded-lg border transition-all flex items-center justify-between group
+                    ${scenarioKey === key 
+                      ? 'bg-blue-900/20 border-blue-500/50' 
+                      : 'bg-slate-800 border-slate-700 hover:bg-slate-700'}
+                    disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  <div className="flex items-start space-x-3">
+                    <div className={`mt-1 ${scenarioKey === key ? 'text-blue-400' : 'text-slate-500 group-hover:text-blue-400'}`}>
+                      {data.icon}
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-white group-hover:text-blue-400 transition-colors">
+                        {data.title}
+                      </div>
+                      <div className="flex items-center space-x-2 text-xs text-slate-500">
+                        <span className="px-1.5 py-0.5 bg-slate-900 rounded text-[10px]">
+                          {data.stats.contextSize}
+                        </span>
+                        <span className="font-mono truncate max-w-[120px]">
+                           {data.stats.tokenCount.context > 1000 ? `${(data.stats.tokenCount.context/1000).toFixed(1)}k tokens` : `${data.stats.tokenCount.context} tokens`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  {isRunning && scenarioKey === key ? (
+                    <RefreshCw className="w-4 h-4 text-blue-400 animate-spin" />
+                  ) : (
+                    <Play className="w-4 h-4 text-slate-600 group-hover:text-white" />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-slate-800 space-y-2">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-400">Lab Power Efficiency:</span>
+                <span className="text-green-400 font-mono">High ({BENCHMARKS.npu_power}W NPU)</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                 <span className="text-slate-400">Total Runs:</span>
+                 <span className="text-blue-400 font-mono">{labMetrics.totalRuns}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Enhanced Logs/Telemetry Terminal */}
+          <div className="lg:col-span-2 bg-black border border-slate-800 rounded-xl p-4 font-mono text-sm overflow-hidden flex flex-col h-[500px] shadow-inner">
+            <div className="flex items-center justify-between text-slate-500 border-b border-slate-900 pb-2 mb-2">
+               <div className="flex space-x-4">
+                  <button 
+                    onClick={() => setActiveTab('console')}
+                    className={`text-xs font-bold uppercase tracking-wider pb-2 border-b-2 transition-colors ${activeTab === 'console' ? 'text-blue-400 border-blue-400' : 'text-slate-600 border-transparent hover:text-slate-400'}`}
+                  >
+                    Output Console
+                  </button>
+                  <button 
+                    onClick={() => setActiveTab('telemetry')}
+                    className={`text-xs font-bold uppercase tracking-wider pb-2 border-b-2 transition-colors ${activeTab === 'telemetry' ? 'text-purple-400 border-purple-400' : 'text-slate-600 border-transparent hover:text-slate-400'}`}
+                  >
+                    Lab Telemetry
+                  </button>
+               </div>
+              <div className="flex items-center space-x-3">
+                <button 
+                  onClick={() => setLogs([])}
+                  className="text-xs text-slate-600 hover:text-white transition-colors"
+                >
+                  Clear
+                </button>
+                <span className="text-xs opacity-50">v3.0.0-Lab</span>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-2 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
+              {activeTab === 'console' ? (
+                 logs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-700 italic space-y-2">
+                    <Layers className="w-10 h-10 opacity-20" />
+                    <span>Initialize Lab Scenario to begin benchmarking</span>
+                    <span className="text-xs">Select a test case from the left</span>
+                  </div>
+                ) : (
+                  logs.map((log) => (
+                    <div key={log.id} className="flex space-x-3 animate-in fade-in slide-in-from-left-2 duration-300">
+                      <span className="text-slate-600 min-w-[90px] text-xs pt-0.5 font-mono select-none">
+                        {new Date(log.timestamp).toLocaleTimeString([], {hour12: false, hour: '2-digit', minute:'2-digit', second:'2-digit'})}
+                      </span>
+                      <div className="flex items-start space-x-2 flex-1">
+                        <span className={`text-xs font-bold uppercase tracking-wider select-none
+                          ${log.source === 'Entra ID' ? 'text-cyan-500' :
+                            log.source === 'Azure AI Foundry' ? 'text-blue-500' : 
+                            log.source === 'Foundry Local' ? 'text-purple-500' : 
+                            log.source === 'MCP Client' || log.source === 'MCP Server' ? 'text-orange-500' :
+                            log.source === 'Windows 25H2' ? 'text-green-500' :
+                            log.source === 'System' ? 'text-slate-400' :
+                            log.source === 'Metrics' ? 'text-yellow-500' :
+                            'text-slate-400'}`}>
+                          {log.source}:
+                        </span>
+                        <span className={`
+                          ${log.type === 'input' ? 'text-white font-bold' : 
+                            log.type === 'success' ? 'text-green-400' : 
+                            log.type === 'process' ? 'text-blue-300' : 
+                            log.type === 'action' ? 'text-orange-300' : 
+                            log.type === 'secure' ? 'text-emerald-400' :
+                            'text-slate-300'}
+                        `}>
+                          {log.message}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )
+              ) : (
+                 <TelemetryPanel labMetrics={labMetrics} activeScenario={activeScenario} />
+              )}
+              <div ref={(el) => el?.scrollIntoView({ behavior: "smooth" })} />
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default EntraNexusStudio;
